@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Avatar Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#000;--fg:#f4f4f2;--mut:#7d7d7d;--line:#262626;--acc:#9fd3ff;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px);background:var(--bg)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Instrument Sans",-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.4}
+[hidden]{display:none!important}
+header{display:flex;align-items:baseline;gap:12px;padding:22px 20px 6px}
+h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-.02em}
+#count{color:var(--mut);font-size:15px}
+#grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 14px;padding:14px 20px 120px;max-width:720px;margin:0 auto}
+.card{background:none;border:0;padding:0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.card img,.ph{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:14px;background:#141414}
+.ph{display:grid;place-items:center;font-size:48px;font-weight:600;color:var(--mut)}
+.card b{display:block;margin-top:8px;font-weight:600}
+.card small{color:var(--mut);font-size:14px}
+.empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:46vh;background:none;border:1.5px dashed #333;border-radius:24px;color:var(--acc);font:inherit;font-size:84px;font-weight:400;line-height:1;cursor:pointer}
+.empty small{font-size:16px;color:var(--mut)}
+#fab{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));width:60px;height:60px;border:0;border-radius:50%;background:#fff;color:#000;font-size:36px;line-height:1;cursor:pointer}
+.sheet{position:fixed;inset:0;z-index:20;display:flex;align-items:flex-end;background:rgba(0,0,0,.72)}
+.panel{width:100%;max-width:560px;max-height:92%;margin:0 auto;overflow-y:auto;background:#0d0d0d;border-radius:22px 22px 0 0;padding:22px 20px calc(24px + env(safe-area-inset-bottom,0px));animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(28px);opacity:0}}
+@media (prefers-reduced-motion:reduce){.panel{animation:none}}
+h2{margin:0 0 4px;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.mut{color:var(--mut);font-size:14px;margin:6px 0}
+input,textarea{display:block;width:100%;margin-top:10px;padding:13px 14px;background:#000;color:var(--fg);border:1px solid var(--line);border-radius:12px;font:inherit;font-size:16px}
+textarea{min-height:72px;resize:vertical}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.choice{display:block;width:100%;margin-top:12px;padding:18px;text-align:left;background:#000;color:var(--fg);border:1px solid var(--line);border-radius:14px;font:inherit;cursor:pointer}
+.choice b{display:block;font-size:17px}
+.choice span{color:var(--mut);font-size:14px}
+.photo{display:grid;place-items:center;aspect-ratio:4/3;margin-top:12px;border:1.5px dashed #333;border-radius:14px;background-size:cover;background-position:center;color:var(--acc);cursor:pointer}
+.hero{display:block;width:100%;max-height:340px;object-fit:cover;border-radius:14px;margin-bottom:14px}
+pre{margin:8px 0 0;padding:12px;background:#000;border:1px solid var(--line);border-radius:12px;color:#cfcfcf;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;overflow-x:auto}
+.row{display:flex;gap:10px;margin-top:16px}
+.go,.ghost{flex:1;padding:14px;border:0;border-radius:12px;font:inherit;font-weight:600;cursor:pointer}
+.go{background:#fff;color:#000}
+.ghost{background:#1a1a1a;color:var(--fg)}
+.wide{width:100%;margin-top:10px}
+#toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:30;padding:10px 16px;border-radius:20px;background:#fff;color:#000;font-size:14px;max-width:90%}
+</style>
+</head>
+<body>
+<header><h1>Avatars</h1><span id="count"></span></header>
+<main id="grid"></main>
+<button id="fab" aria-label="New avatar">+</button>
+<div id="sheet" class="sheet" hidden><div class="panel" id="panel"></div></div>
+<div id="toast" role="status" hidden></div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let A=[];
+try{A=JSON.parse(localStorage.getItem('avatars')||'[]')}catch(e){A=[]}
+function persist(){try{localStorage.setItem('avatars',JSON.stringify(A));return true}catch(e){toast('Couldn’t save. Storage is full.');return false}}
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},2600)}
+function openSheet(h){$('panel').innerHTML=h;$('sheet').hidden=false}
+function closeSheet(){$('sheet').hidden=true}
+$('sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
+const slugify=n=>n.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'avatar';
+function shrink(file){
+  const draw=(src,w,h)=>{const r=Math.min(1,640/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.round(w*r);c.height=Math.round(h*r);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.82)};
+  const viaReader=()=>new Promise((res,rej)=>{const fr=new FileReader();fr.onerror=()=>rej(new Error('could not read file'));fr.onload=()=>{const i=new Image();i.onload=()=>{try{res(draw(i,i.width,i.height))}catch(e){rej(e)}};i.onerror=()=>rej(new Error('format not supported'));i.src=fr.result};fr.readAsDataURL(file)});
+  if(window.createImageBitmap){return createImageBitmap(file).then(b=>draw(b,b.width,b.height)).catch(viaReader)}
+  return viaReader();
+}
+
+function render(){
+  $('count').textContent=A.length?A.length+(A.length>1?' avatars':' avatar'):'';
+  $('fab').hidden=!A.length;
+  const g=$('grid');
+  if(!A.length){g.innerHTML='<button class="empty" id="e" aria-label="Create your first avatar">+<small>Create your first avatar</small></button>';$('e').onclick=pick;return}
+  g.innerHTML=A.map((a,i)=>'<button class="card" data-i="'+i+'">'+(a.img?'<img src="'+a.img+'" alt="">':'<div class="ph">'+esc(a.name.charAt(0).toUpperCase())+'</div>')+'<b>'+esc(a.name)+'</b><small>'+(a.type==='self'?'Self-avatar':'Character')+'</small></button>').join('');
+  g.querySelectorAll('.card').forEach(b=>{b.onclick=()=>show(+b.dataset.i)});
+}
+
+function pick(){
+  openSheet('<h2>New avatar</h2><button class="choice" id="c1"><b>Custom character</b><span>Name it, add a photo and describe it.</span></button><button class="choice" id="c2"><b>Self-avatar</b><span>Take a selfie to use as your own baseline.</span></button>');
+  $('c1').onclick=()=>form('character');
+  $('c2').onclick=()=>form('self');
+}
+
+function form(type){
+  const self=type==='self';let img='';
+  openSheet('<h2>'+(self?'Self-avatar':'New character')+'</h2>'
+   +'<label class="photo" id="ph"><input id="f" type="file" accept="image/*" '+(self?'capture="user" ':'')+'hidden><span id="pt">'+(self?'Take a selfie':'Add a reference photo')+'</span></label>'
+   +'<input id="n" placeholder="Name" maxlength="40" autocomplete="off">'
+   +'<textarea id="t" placeholder="Physical traits"></textarea>'
+   +'<textarea id="s" placeholder="Style and camera notes"></textarea>'
+   +'<textarea id="o" placeholder="Persona or backstory"></textarea>'
+   +'<div class="row"><button class="ghost" id="x">Cancel</button><button class="go" id="ok">Save avatar</button></div>');
+  $('f').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{img=await shrink(f);$('ph').style.backgroundImage='url("'+img+'")';$('pt').hidden=true}catch(err){toast('Couldn’t read that photo: '+((err&&err.message)||'unknown error'))}};
+  $('x').onclick=closeSheet;
+  $('ok').onclick=()=>{
+    const name=$('n').value.trim();
+    if(!name){toast('Add a name first.');$('n').focus();return}
+    const base=slugify(name);let s=base,k=2;
+    while(A.some(a=>a.slug===s))s=base+'_'+k++;
+    A.push({slug:s,name,type,img,traits:$('t').value.trim(),style:$('s').value.trim(),notes:$('o').value.trim()});
+    if(persist()){closeSheet();render()}else A.pop();
+  };
+}
+
+function show(i){
+  const a=A[i];
+  const j=JSON.stringify({mention:'@'+a.slug,name:a.name,type:a.type==='self'?'self-avatar':'character',physical_traits:a.traits,style_notes:a.style,persona:a.notes,reference_image:a.img?'(attached)':null},null,2);
+  openSheet((a.img?'<img class="hero" src="'+a.img+'" alt="">':'')
+   +'<h2>'+esc(a.name)+'</h2>'
+   +'<p class="mut">Once your AI is connected, writing @'+esc(a.slug)+' will fetch this.</p>'
+   +'<pre>'+esc(j)+'</pre>'
+   +'<div class="row"><button class="ghost" id="d">Delete</button><button class="go" id="cp">Copy</button></div>'
+   +'<button class="ghost wide" id="cl">Close</button>');
+  let armed=false;
+  $('d').onclick=()=>{if(!armed){armed=true;$('d').textContent='Tap again to delete';return}A.splice(i,1);persist();closeSheet();render()};
+  $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(j);toast('Copied.')}catch(e){toast('Couldn’t copy. Select the text instead.')}};
+  $('cl').onclick=closeSheet;
+}
+
+$('fab').onclick=pick;
+render();
+</script>
+</body>
+</html>
