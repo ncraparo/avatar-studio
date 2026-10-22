@@ -64,13 +64,19 @@ pre{margin:8px 0 0;padding:12px;background:#1b2230;color:#d6dde8;border-radius:1
 </div>
 <div id="sheet" class="sheet" hidden><div class="panel" id="panel"></div></div>
 <div id="toast" role="status" hidden></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SB_URL='https://zadhncaymaasjmawnavn.supabase.co',SB_KEY='sb_publishable_nL0ju7AULGVKFhh7EOnfzA_NZJo27qc',BUCKET='avatar-images';
+const REMOTE=!!(window.supabase&&window.supabase.createClient);
+const sb=REMOTE?window.supabase.createClient(SB_URL,SB_KEY):null;
 const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
-let A=ld('ucap_avatars',[]),U=ld('ucap_user',null);
-function save(){try{localStorage.setItem('ucap_avatars',JSON.stringify(A));localStorage.setItem('ucap_user',JSON.stringify(U));return true}catch(e){toast('Couldn’t save. Storage is full.');return false}}
-function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},2600)}
+const msg=e=>(e&&e.message)||String(e||'unknown error');
+const blobOf=async d=>(await fetch(d)).blob();
+let A=REMOTE?[]:ld('ucap_avatars',[]),U=REMOTE?null:ld('ucap_user',null);
+function save(){if(REMOTE)return true;try{localStorage.setItem('ucap_avatars',JSON.stringify(A));localStorage.setItem('ucap_user',JSON.stringify(U));return true}catch(e){toast('Couldn’t save. Storage is full.');return false}}
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>{t.hidden=true},3200)}
 function openSheet(h){$('panel').innerHTML=h;$('sheet').hidden=false}
 function closeSheet(){$('sheet').hidden=true}
 $('sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
@@ -83,6 +89,29 @@ function shrink(file,max){
   return viaReader();
 }
 
+/* ---- Supabase helpers ---- */
+async function urls(paths){
+  const m={};if(!paths.length)return m;
+  const {data}=await sb.storage.from(BUCKET).createSignedUrls(paths,3600);
+  (data||[]).forEach(d=>{if(d.signedUrl)m[d.path]=d.signedUrl});
+  return m;
+}
+async function loadRemote(){
+  const {data,error}=await sb.from('avatars').select('*').order('created_at');
+  if(error){toast('Couldn’t load avatars: '+error.message);return}
+  const m=await urls(data.filter(r=>r.image_path).map(r=>r.image_path));
+  A=data.map(r=>({id:r.id,slug:r.slug,name:r.name,type:r.type,traits:r.traits,style:r.style,notes:r.notes,path:r.image_path,img:m[r.image_path]||''}));
+  render();
+}
+async function loadPic(){const p=U.id+'/account.jpg',m=await urls([p]);U.pic=m[p]||'';renderAcct()}
+async function setUser(s){
+  if(s&&U&&U.id===s.user.id)return;
+  if(!s){U=null;A=[];renderAcct();render();return}
+  U={id:s.user.id,name:(s.user.email||'').split('@')[0],email:s.user.email,pic:''};
+  renderAcct();await loadRemote();loadPic();
+}
+
+/* ---- Rendering ---- */
 function renderAcct(){
   const b=$('acct');
   if(!U){b.className='';b.style.backgroundImage='';b.textContent='Login';return}
@@ -90,7 +119,6 @@ function renderAcct(){
   if(U.pic){b.textContent='';b.style.backgroundImage='url("'+U.pic+'")'}
   else{b.style.backgroundImage='';b.textContent=(U.name||'?').charAt(0).toUpperCase()}
 }
-
 function render(){
   const n=Math.max(6,Math.ceil((A.length+1)/3)*3);let h='';
   for(let i=0;i<n;i++){
@@ -101,16 +129,31 @@ function render(){
   $('grid').querySelectorAll('.tile').forEach(b=>{b.onclick=()=>{const i=+b.dataset.i;i<0?pick():show(i)}});
 }
 
-function loginSheet(){
-  openSheet('<h2>Log in</h2><p class="mut">Demo login for now. It’s saved on this device only.</p>'
-   +'<button class="choice" id="g"><b>Continue with Google</b><span>Will use your Google account picture once the backend is added.</span></button>'
+/* ---- Login and account ---- */
+function loginSheet(note){
+  openSheet('<h2>Log in</h2><p class="mut">'+esc(note||(REMOTE?'Log in or create an account to save your avatars.':'Demo login. Saved on this device only.'))+'</p>'
+   +'<button class="choice" id="g"><b>Continue with Google</b><span>Coming soon.</span></button>'
    +'<input id="em" type="email" placeholder="Email" autocomplete="email">'
-   +'<div class="row"><button class="ghost" id="x">Cancel</button><button class="go" id="ok">Continue</button></div>');
-  $('g').onclick=()=>toast('Google sign-in connects once the backend is added.');
-  $('x').onclick=closeSheet;
-  $('ok').onclick=()=>{const e=$('em').value.trim();if(!e){toast('Enter an email first.');return}U={name:e.split('@')[0],email:e,pic:''};if(save()){closeSheet();renderAcct()}else U=null};
+   +(REMOTE?'<input id="pw" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">':'')
+   +'<div class="row"><button class="ghost" id="su">'+(REMOTE?'Create account':'Cancel')+'</button><button class="go" id="ok">Log in</button></div>');
+  $('g').onclick=()=>toast('Google sign-in is coming soon.');
+  $('ok').onclick=async()=>{
+    const e=$('em').value.trim();
+    if(!e){toast('Enter your email first.');return}
+    if(!REMOTE){U={name:e.split('@')[0],email:e,pic:''};if(save()){closeSheet();renderAcct()}else U=null;return}
+    const pw=$('pw').value;if(!pw){toast('Enter your password.');return}
+    const {error}=await sb.auth.signInWithPassword({email:e,password:pw});
+    if(error)toast(error.message);else closeSheet();
+  };
+  $('su').onclick=async()=>{
+    if(!REMOTE){closeSheet();return}
+    const e=$('em').value.trim(),pw=$('pw').value;
+    if(!e||pw.length<6){toast('Enter an email and a password of 6+ characters.');return}
+    const {data,error}=await sb.auth.signUp({email:e,password:pw});
+    if(error){toast(error.message);return}
+    if(data.session)closeSheet();else toast('Check your email to confirm, then log in.');
+  };
 }
-
 function accountSheet(){
   openSheet('<div class="me"><div class="mepic" id="mp">'+(U.pic?'':esc((U.name||'?').charAt(0).toUpperCase()))+'</div><div><h2>'+esc(U.name)+'</h2><p class="mut">'+esc(U.email||'')+'</p></div></div>'
    +'<label class="choice"><b>Change picture</b><span>Pick a photo from your device.</span><input id="pf" type="file" accept="image/*" hidden></label>'
@@ -118,18 +161,27 @@ function accountSheet(){
    +'<button class="choice" id="s2"><b>MCP connection</b><span>Coming soon</span></button>'
    +'<div class="row"><button class="ghost" id="lo">Log out</button><button class="go" id="cl">Done</button></div>');
   if(U.pic)$('mp').style.backgroundImage='url("'+U.pic+'")';
-  $('pf').onchange=e=>{const f=e.target.files[0];if(!f)return;shrink(f,256).then(d=>{U.pic=d;if(save()){renderAcct();accountSheet()}}).catch(err=>toast('Couldn’t read that photo: '+((err&&err.message)||'unknown error')))};
+  $('pf').onchange=async e=>{
+    const f=e.target.files[0];if(!f)return;
+    try{
+      const d=await shrink(f,256);
+      if(REMOTE){const {error}=await sb.storage.from(BUCKET).upload(U.id+'/account.jpg',await blobOf(d),{upsert:true,contentType:'image/jpeg'});if(error)throw error;await loadPic()}
+      else{U.pic=d;save();renderAcct()}
+      accountSheet();
+    }catch(err){toast('Couldn’t update picture: '+msg(err))}
+  };
   $('s1').onclick=$('s2').onclick=()=>toast('Coming soon.');
-  $('lo').onclick=()=>{U=null;save();closeSheet();renderAcct()};
+  $('lo').onclick=async()=>{closeSheet();if(REMOTE){await sb.auth.signOut()}else{U=null;save();renderAcct()}};
   $('cl').onclick=closeSheet;
 }
 
+/* ---- Create, view, delete ---- */
 function pick(){
+  if(REMOTE&&!U){loginSheet('Log in to create avatars.');return}
   openSheet('<h2>New avatar</h2><button class="choice" id="c1"><b>Custom character</b><span>Name it, add a photo and describe it.</span></button><button class="choice" id="c2"><b>Self-avatar</b><span>Take a selfie to use as your own baseline.</span></button>');
   $('c1').onclick=()=>form('character');
   $('c2').onclick=()=>form('self');
 }
-
 function form(type){
   const self=type==='self';let img='';
   openSheet('<h2>'+(self?'Self-avatar':'New character')+'</h2>'
@@ -139,18 +191,29 @@ function form(type){
    +'<textarea id="s" placeholder="Style and camera notes"></textarea>'
    +'<textarea id="o" placeholder="Persona or backstory"></textarea>'
    +'<div class="row"><button class="ghost" id="x">Cancel</button><button class="go" id="ok">Save avatar</button></div>');
-  $('f').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{img=await shrink(f,640);$('ph').style.backgroundImage='url("'+img+'")';$('pt').hidden=true}catch(err){toast('Couldn’t read that photo: '+((err&&err.message)||'unknown error'))}};
+  $('f').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{img=await shrink(f,640);$('ph').style.backgroundImage='url("'+img+'")';$('pt').hidden=true}catch(err){toast('Couldn’t read that photo: '+msg(err))}};
   $('x').onclick=closeSheet;
-  $('ok').onclick=()=>{
+  $('ok').onclick=async()=>{
     const name=$('n').value.trim();
     if(!name){toast('Add a name first.');$('n').focus();return}
     const base=slugify(name);let s=base,k=2;
     while(A.some(a=>a.slug===s))s=base+'_'+k++;
-    A.push({slug:s,name,type,img,traits:$('t').value.trim(),style:$('s').value.trim(),notes:$('o').value.trim()});
+    const rec={slug:s,name,type,traits:$('t').value.trim(),style:$('s').value.trim(),notes:$('o').value.trim()};
+    if(REMOTE){
+      $('ok').disabled=true;
+      try{
+        const id=crypto.randomUUID();let path=null;
+        if(img){path=U.id+'/'+id+'.jpg';const {error:ue}=await sb.storage.from(BUCKET).upload(path,await blobOf(img),{contentType:'image/jpeg'});if(ue)throw ue}
+        const {error}=await sb.from('avatars').insert({id,...rec,image_path:path});
+        if(error)throw error;
+        closeSheet();await loadRemote();
+      }catch(err){toast('Couldn’t save: '+msg(err));$('ok').disabled=false}
+      return;
+    }
+    A.push({...rec,img});
     if(save()){closeSheet();render()}else A.pop();
   };
 }
-
 function show(i){
   const a=A[i];
   const j=JSON.stringify({mention:'@'+a.slug,name:a.name,type:a.type==='self'?'self-avatar':'character',physical_traits:a.traits,style_notes:a.style,persona:a.notes,reference_image:a.img?'(attached)':null},null,2);
@@ -161,7 +224,16 @@ function show(i){
    +'<div class="row"><button class="ghost" id="d">Delete</button><button class="go" id="cp">Copy</button></div>'
    +'<button class="ghost wide" id="cl">Close</button>');
   let armed=false;
-  $('d').onclick=()=>{if(!armed){armed=true;$('d').textContent='Tap again to delete';return}A.splice(i,1);save();closeSheet();render()};
+  $('d').onclick=async()=>{
+    if(!armed){armed=true;$('d').textContent='Tap again to delete';return}
+    if(REMOTE){
+      const {error}=await sb.from('avatars').delete().eq('id',a.id);
+      if(error){toast('Couldn’t delete: '+error.message);return}
+      if(a.path)await sb.storage.from(BUCKET).remove([a.path]);
+      closeSheet();await loadRemote();return;
+    }
+    A.splice(i,1);save();closeSheet();render();
+  };
   $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(j);toast('Copied.')}catch(e){toast('Couldn’t copy. Select the text instead.')}};
   $('cl').onclick=closeSheet;
 }
@@ -169,6 +241,7 @@ function show(i){
 $('plus').onclick=pick;
 $('acct').onclick=()=>{U?accountSheet():loginSheet()};
 renderAcct();render();
+if(REMOTE){sb.auth.onAuthStateChange((ev,s)=>{setTimeout(()=>setUser(s),0)})}
 </script>
 </body>
 </html>
