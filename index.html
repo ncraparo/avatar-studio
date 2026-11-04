@@ -158,7 +158,7 @@ function accountSheet(){
   openSheet('<div class="me"><div class="mepic" id="mp">'+(U.pic?'':esc((U.name||'?').charAt(0).toUpperCase()))+'</div><div><h2>'+esc(U.name)+'</h2><p class="mut">'+esc(U.email||'')+'</p></div></div>'
    +'<label class="choice"><b>Change picture</b><span>Pick a photo from your device.</span><input id="pf" type="file" accept="image/*" hidden></label>'
    +'<button class="choice" id="s1"><b>Platform settings</b><span>Coming soon</span></button>'
-   +'<button class="choice" id="s2"><b>MCP connection</b><span>Coming soon</span></button>'
+   +'<button class="choice" id="s2"><b>MCP connection</b><span>Connect Claude to your avatars</span></button>'
    +'<div class="row"><button class="ghost" id="lo">Log out</button><button class="go" id="cl">Done</button></div>');
   if(U.pic)$('mp').style.backgroundImage='url("'+U.pic+'")';
   $('pf').onchange=async e=>{
@@ -170,8 +170,30 @@ function accountSheet(){
       accountSheet();
     }catch(err){toast('Couldn’t update picture: '+msg(err))}
   };
-  $('s1').onclick=$('s2').onclick=()=>toast('Coming soon.');
+  $('s1').onclick=()=>toast('Coming soon.');$('s2').onclick=mcpSheet;
   $('lo').onclick=async()=>{closeSheet();if(REMOTE){await sb.auth.signOut()}else{U=null;save();renderAcct()}};
+  $('cl').onclick=closeSheet;
+}
+
+/* ---- MCP connection ---- */
+async function mcpSheet(){
+  if(!REMOTE||!U){toast('Log in first.');return}
+  let {data,error}=await sb.from('connectors').select('secret').maybeSingle();
+  if(error){toast('Couldn’t load your link: '+error.message);return}
+  if(!data){const r=await sb.from('connectors').insert({}).select('secret').single();if(r.error){toast('Couldn’t create your link: '+r.error.message);return}data=r.data}
+  const link=SB_URL+'/functions/v1/mcp?key='+data.secret;
+  openSheet('<h2>MCP connection</h2><p class="mut">Add this link in Claude as a custom connector. Anyone who has it can read your avatars, so treat it like a password.</p>'
+   +'<pre style="white-space:pre-wrap;word-break:break-all">'+esc(link)+'</pre>'
+   +'<div class="row"><button class="ghost" id="rs">Reset link</button><button class="go" id="cp">Copy link</button></div>'
+   +'<button class="ghost wide" id="cl">Close</button>');
+  let armed=false;
+  $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(link);toast('Link copied.')}catch(e){toast('Couldn’t copy. Press and hold the link to select it.')}};
+  $('rs').onclick=async()=>{
+    if(!armed){armed=true;$('rs').textContent='Tap again to reset';return}
+    const {error:de}=await sb.from('connectors').delete().eq('user_id',U.id);
+    if(de){toast('Couldn’t reset: '+de.message);return}
+    mcpSheet();
+  };
   $('cl').onclick=closeSheet;
 }
 
